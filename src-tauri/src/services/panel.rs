@@ -61,6 +61,14 @@ mod mac {
             Err(_) => false,
         }
     }
+
+    pub fn window_number<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<u32> {
+        let window = app.get_webview_window("main")?;
+        let pointer = window.ns_window().ok()?;
+        let ns_window = pointer.cast::<AnyObject>();
+        let number: isize = unsafe { msg_send![ns_window, windowNumber] };
+        u32::try_from(number).ok().filter(|number| *number > 0)
+    }
 }
 
 /// Call once from `setup`. A failure is logged and the app keeps its plain window.
@@ -111,4 +119,27 @@ fn hide_now<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
+}
+
+#[cfg(target_os = "macos")]
+pub async fn main_window_number<R: Runtime>(app: &AppHandle<R>) -> Option<u32> {
+    let handle = app.clone();
+    on_main_thread(app, move || mac::window_number(&handle))
+        .await
+        .ok()
+        .flatten()
+}
+
+pub async fn on_main_thread<R, T, F>(app: &AppHandle<R>, work: F) -> Result<T, String>
+where
+    R: Runtime,
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (done, wait) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let _ = done.send(work());
+    })
+    .map_err(|e| e.to_string())?;
+    wait.await.map_err(|e| e.to_string())
 }

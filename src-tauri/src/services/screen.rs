@@ -9,13 +9,17 @@ mod mac {
     use tauri::{AppHandle, Manager, Runtime};
 
     use crate::models::screen::ScreenShot;
-    use crate::services::panel;
+    use crate::services::{panel, window};
+    use crate::utils::images;
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGPreflightScreenCaptureAccess() -> bool;
         fn CGRequestScreenCaptureAccess() -> bool;
     }
+
+    /// How long macOS needs to really remove a hidden window from the screen.
+    const HIDE_SETTLE_MS: u64 = 250;
 
     enum Mode {
         /// The whole main display
@@ -56,16 +60,7 @@ mod mac {
         let id = uuid::Uuid::new_v4().simple().to_string();
         let path = screen_dir(app)?.join(format!("{id}.png"));
 
-        // Hide Chotu so it isn't in the picture, and always bring it back after.
-        panel::hide_main_window(app);
-
-        // Give macOS a moment to really remove the window from the screen.
-        tokio::time::sleep(Duration::from_millis(250)).await;
-
-        let finished = run_screencapture(&path, &mode).await;
-
-        panel::show_main_window(app);
-        finished?;
+        take_screenshot(app, &path, &mode).await?;
 
         // Pressing Esc while dragging ends `screencapture` without making a file.
         if !path.exists() {
@@ -84,6 +79,51 @@ mod mac {
             width,
             height,
         }))
+    }
+
+    /// The whole screen is photographed without Chotu and without hiding it. If that fails, or
+    /// the user drags a box, Chotu hides for a moment instead.
+    async fn take_screenshot<R: Runtime>(
+        app: &AppHandle<R>,
+        path: &Path,
+        mode: &Mode,
+    ) -> Result<(), String> {
+        if matches!(mode, Mode::Display) {
+            match photograph_below_chotu(app, path).await {
+                Ok(()) => return Ok(()),
+                Err(e) => log::warn!("could not photograph below chotu ({e}), hiding it instead!"),
+            }
+        }
+
+        photograph_with_hiding_chotu(app, path, mode).await
+    }
+
+    /// Hides Chotu so it isn't in the picture, and always brings it back after.
+    async fn photograph_with_hiding_chotu<R: Runtime>(
+        app: &AppHandle<R>,
+        path: &Path,
+        mode: &Mode,
+    ) -> Result<(), String> {
+        panel::hide_main_window(app);
+        tokio::time::sleep(Duration::from_millis(HIDE_SETTLE_MS)).await;
+
+        let finished = run_screencapture(path, mode).await;
+        panel::show_main_window(app);
+        finished
+    }
+
+    /// Asks macOS for every window below Chotu's, so Chotu stays where it is.
+    async fn photograph_below_chotu<R: Runtime>(
+        app: &AppHandle<R>,
+        path: &Path,
+    ) -> Result<(), String> {
+        let window_id = panel::main_window_number(app)
+            .await
+            .ok_or("could not find chotu's main window!")?;
+
+        let (width, height, pixels) =
+            panel::on_main_thread(app, move || window::capture_below_chotu(window_id)).await??;
+        images::save_rgba_png(width, height, pixels, path)
     }
 
     fn screen_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {

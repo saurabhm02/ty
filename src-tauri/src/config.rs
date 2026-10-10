@@ -15,6 +15,23 @@ pub const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_
 
 pub const DDG_URL: &str = "https://html.duckduckgo.com/html/";
 
+/// Where OpenRouter answers decision questions. This is not the chat address.
+pub const DECISION_API_URL: &str = "https://openrouter.ai/api/alpha/decisions";
+
+/// A decision model that has not answered after this long is given up on (the next one is tried).
+pub const DECISION_TIMEOUT_S: u64 = 3;
+
+/// Free decision models tried in this order when `AI_DECISION_MODEL` is not set.
+/// Span-01 Lite goes first: it got every yes/no test question right. It only does yes/no.
+pub const DEFAULT_DECISION_MODELS: [&str; 2] =
+    ["respan/span-01-lite:free", "inception/mercury-decide:free"];
+
+/// A chance of "yes" at or above this counts as a sure yes.
+pub const SURE_YES_PERCENTAGE: f32 = 0.8;
+
+/// A chance of "yes" at or below this counts as a sure no.
+pub const SURE_NO_PERCENTAGE: f32 = 0.3;
+
 pub const TIMEOUT_S: u64 = 5;
 pub const PAGE_CONTENT_CHAR: usize = 1500;
 pub const TOP_PAGE_K: usize = 5;
